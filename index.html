@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Macro Pad Viewer</title>
+  <style>
+    body { 
+      font-family: Arial, sans-serif; 
+      text-align: center; 
+      padding: 20px; 
+      background-color: #222; 
+      color: #fff;
+    }
+    h2 { color: #FFD700; }
+    #output { margin-top: 20px; }
+    .grid-container {
+      display: grid;
+      grid-template-columns: repeat(3, 80px);
+      grid-template-rows: repeat(3, 80px);
+      gap: 10px;
+      justify-content: center;
+      margin-top: 20px;
+    }
+    .key {
+      width: 80px;
+      height: 80px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      font-weight: bold;
+      background: linear-gradient(to bottom, #ddd, #bbb);
+      border: 4px solid #888;
+      border-radius: 10px;
+      box-shadow: 3px 3px 6px rgba(0, 0, 0, 0.5);
+      text-transform: none;
+      padding: 2px;
+    }
+    select, input, button {
+      margin: 10px;
+      padding: 10px;
+      font-size: 16px;
+      border-radius: 5px;
+      border: none;
+    }
+    input, button { background: #444; color: #fff; }
+    select { background: #FFD700; color: #000; }
+    button { cursor: pointer; }
+
+    /* Makro-Namen Container */
+    .macro-name-container {
+      margin-top: 10px;
+      display: none;
+      border: 2px solid #FFD700;
+      padding: 10px;
+      border-radius: 5px;
+      background: #333;
+    }
+    .macro-input {
+      margin: 5px;
+      padding: 5px;
+      font-size: 14px;
+      width: 200px;
+    }
+
+    /* Druckstil */
+    @media print {
+      body { background: white; color: black; text-align: center; }
+      h2, input, select, button, #macroNames, #toggleMacroNames { display: none; } /* Versteckt UI-Elemente */
+      .grid-container { margin: auto; }
+      .key {
+        border: 2px solid black;
+        box-shadow: none;
+        font-size: 14px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h2>Macro Pad Viewer</h2>
+  <input type="file" id="fileInput">
+  <br>
+  <label for="layerSelect">🔄 Layer wählen:</label>
+  <select id="layerSelect" disabled></select>
+  <button onclick="printLayout()">🖨️ Alle Layers drucken</button>
+  <button id="toggleMacroNames" onclick="toggleMacroNames()">📂 Makro-Namen bearbeiten</button>
+
+  <div class="macro-name-container" id="macroNames"></div>
+  
+  <div id="output">Lade eine JSON-Datei hoch...</div>
+
+  <!-- Einbinden der externen Mapping-Datei -->
+  <script src="keyMapping.js"></script>
+  <script>
+    let jsonData = null;
+    let macroNames = {};
+
+    document.getElementById('fileInput').addEventListener('change', function(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          jsonData = JSON.parse(e.target.result);
+          initLayerSelect(jsonData.layers.length);
+          createMacroInputs();
+          displayLayer(0);
+        } catch (error) {
+          document.getElementById('output').textContent = "Fehler: Ungültige JSON-Datei!";
+        }
+      };
+      reader.readAsText(file);
+    });
+
+    function initLayerSelect(layerCount) {
+      const select = document.getElementById('layerSelect');
+      select.innerHTML = "";
+      select.disabled = false;
+      for (let i = 0; i < layerCount; i++) {
+        const option = document.createElement('option');
+        option.value = i;
+        option.textContent = `Layer ${i}`;
+        select.appendChild(option);
+      }
+      select.addEventListener('change', function() {
+        displayLayer(parseInt(this.value));
+      });
+    }
+
+    function createMacroInputs() {
+      const macroContainer = document.getElementById('macroNames');
+      macroContainer.innerHTML = "<h3>🔧 Makro-Namen bearbeiten:</h3>";
+
+      for (let i = 0; i < 35; i++) {
+        const macroKey = `MACRO(${i})`;
+
+        if (jsonData.layers.some(layer => layer.includes(macroKey))) {
+          macroNames[macroKey] = `Macro ${i}`; // Standardname setzen
+          macroContainer.innerHTML += `
+            <label>Macro ${i}: </label>
+            <input type="text" class="macro-input" id="macro-${i}" value="Macro ${i}" oninput="updateMacroName(${i})">
+            <br>
+          `;
+        }
+      }
+    }
+
+    function updateMacroName(index) {
+      const input = document.getElementById(`macro-${index}`);
+      macroNames[`MACRO(${index})`] = input.value;
+      displayLayer(parseInt(document.getElementById("layerSelect").value));
+    }
+
+    function toggleMacroNames() {
+      const macroContainer = document.getElementById('macroNames');
+      macroContainer.style.display = (macroContainer.style.display === "none" || macroContainer.style.display === "") ? "block" : "none";
+    }
+
+    function cleanKeyLabel(key) {
+      if (!key) return "—";
+      if (key.startsWith("MACRO(")) return macroNames[key] || key; // Benutzerdefinierter Makro-Name
+      if (key.startsWith("LT(")) {
+        const match = key.match(/LT\(\d+,(.*)\)/);
+        if (match && match[1]) key = match[1];
+      }
+      let prefix = "";
+      if (key[0] === '+' || key[0] === '-') {
+        prefix = key[0];
+        key = key.slice(1);
+      }
+      return keyMapping[key] ? prefix + keyMapping[key] : prefix + key.replace("KC_", "");
+    }
+
+    function displayLayer(layerIndex) {
+      if (!jsonData || !jsonData.layers) return;
+      const layer = jsonData.layers[layerIndex];
+
+      let output = `<h3>📚 Layer ${layerIndex}</h3><div class="grid-container">`;
+      for (let i = 3; i < 12; i++) {
+        const keyLabel = cleanKeyLabel(layer[i]);
+        output += `<div class="key">${keyLabel}</div>`;
+      }
+      output += "</div>";
+      document.getElementById('output').innerHTML = output;
+    }
+
+    function printLayout() {
+      let printContent = "<h1>📜 Macro Pad Layout</h1>";
+      jsonData.layers.forEach((layer, index) => {
+        printContent += `<h2>Layer ${index}</h2><table border="1" style="margin:auto; text-align:center; width:60%; font-size:16px;">`;
+
+        for (let i = 3; i < 12; i += 3) {
+          printContent += "<tr>";
+          for (let j = 0; j < 3; j++) {
+            const keyLabel = cleanKeyLabel(layer[i + j]);
+            printContent += `<td style="padding:10px;">${keyLabel}</td>`;
+          }
+          printContent += "</tr>";
+        }
+
+        printContent += "</table><br>";
+      });
+
+      const printWindow = window.open("", "_blank");
+      printWindow.document.write(`<html><head><title>Macro Pad Druck</title></head><body>${printContent}</body></html>`);
+      printWindow.document.close();
+      printWindow.print();
+    }
+  </script>
+</body>
+</html>
